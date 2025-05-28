@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from scipy.stats import linregress
 from scipy.signal import (hilbert, butter, filtfilt,
                           correlate, correlation_lags)
+from scipy.optimize import brentq
 
 
 def fft_gen(time_array, signal):
@@ -229,3 +230,28 @@ def amplitudes(data_in, d = None, bp_w = None, bp_c = None, plot = True):
         plt.show()
 
     return A
+
+def _rayleigh_ratio(nu):
+    # parámetro k = c_S² / c_L²
+    k = (1 - 2*nu) / (2*(1 - nu))             # siempre 0 < k < 1 en el rango válido
+
+    # polinomio f(ξ) = 0  (Rayleigh, 1911)
+    f = lambda x: x**6 - 8*x**4 + 8*(3 - 2*k)*x**2 - 16*(1 - k)
+
+    # única raíz física está en (0,1); brentq necesita extremos con signo opuesto
+    return brentq(f, 1e-9, 1 - 1e-9, maxiter=100, xtol=1e-12)
+
+def wave_speeds(E, nu, rho):
+    if not (-1.0 < nu < 0.5):
+        raise ValueError("ν debe estar en (-1, 0.5).")
+    if E <= 0 or rho <= 0:
+        raise ValueError("E y ρ deben ser positivos.")
+
+    # ondas volumétricas exactas
+    c_L = np.sqrt(E*(1 - nu) / (rho*(1 + nu)*(1 - 2*nu)))
+    c_S = np.sqrt(E / (2*rho*(1 + nu)))
+
+    # onda superficial exacta (resolviendo la ecuación)
+    xi   = _rayleigh_ratio(nu)
+    c_R  = xi * c_S
+    return c_L, c_S, c_R
