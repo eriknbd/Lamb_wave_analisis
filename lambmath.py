@@ -110,12 +110,12 @@ def cc_group_velocity(data_in, d, bp_w = None, bp_c = None, bp_order = 4, plot =
     if offset == None:
         offset = signals[0].max()
 
-    hilbert_signals = [np.abs(hilbert(signal)) for signal in signals]
+    env = [np.abs(hilbert(signal)) for signal in signals]
 
     t = [0]
 
     for i in range(n-1):
-        t.append(t[i]+cc_tau(time, hilbert_signals[i], hilbert_signals[i+1]))
+        t.append(t[i]+cc_tau(time, env[i], env[i+1]))
 
     t = np.array(t)
     lr = linregress(t, d)
@@ -135,7 +135,7 @@ def cc_group_velocity(data_in, d, bp_w = None, bp_c = None, bp_order = 4, plot =
 
         for i in range(n):
             ax[0].plot((time- t[i])*10**6, signals[i] - i*offset)
-            ax[0].plot((time- t[i])*10**6, hilbert_signals[i] - i*offset, c = "red")
+            ax[0].plot((time- t[i])*10**6, env[i] - i*offset, c = "red")
         
         ax[1].scatter(t*10**6, d)
         ax[1].plot(t*10**6, t*lr[0] +lr[1], c = "red")
@@ -145,6 +145,72 @@ def cc_group_velocity(data_in, d, bp_w = None, bp_c = None, bp_order = 4, plot =
     plt.show()
     
     return np.array([lr[0], lr[1], lr[2]**2])
+
+
+def cc_group_velocity_all(data_in, d,
+                          bp_w=None, bp_c=None, bp_order=4,
+                          plot=False, offset=None, title=None):
+    """
+    Calcula la velocidad de grupo usando la correlación cruzada de *todos*
+    los pares de señales (i,j) con i != j.
+
+    Devuelve np.array([vg, intercepto, R2])
+    """
+    # ----------- pre-procesado ---------------------
+    if bp_w is not None:
+        data_in = bandpass(data_in, bp_w, bp_c, bp_order)
+
+    time    = data_in.T[0]
+    signals = data_in.T[1:]
+    n       = signals.shape[0]
+
+    if offset is None:
+        offset = signals[0].max()
+
+    env = [np.abs(hilbert(signal)) for signal in signals]   # envolventes
+
+    # ---------------- correlaciones cruzadas --------------------------
+    taus, dists = [], []
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                continue
+            tau_ij = cc_tau(time, env[i], env[j])   # retraso j respecto a i
+            taus.append(tau_ij)
+            dists.append(d[j] - d[i])              # distancia j-i
+
+    taus, dists = np.array(taus), np.array(dists)
+
+    lr = linregress(taus, dists)                   # pendiente = velocidad
+    vg      = lr.slope
+    y0      = lr.intercept
+    rsquare = lr.rvalue**2
+
+    # -------------------- gráfica --------------------------
+    if plot:
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(1, 2, figsize=(10, 4))
+
+        if title:
+            ax[0].set_title(title, fontweight='bold', loc='left', pad=10)
+        ax[0].set_xlabel("time [µs]")
+        ax[0].set_yticks([])
+        ax[1].set_xlabel("τ [µs]")
+        ax[1].set_ylabel("Δd [m]")
+
+        # Para ilustrar: “alineamos” cada traza usando su τ medio respecto a la 0
+        tau_ref = d/vg
+        
+        for i in range(n):
+            ax[0].plot((time - tau_ref[i]) * 1e6, signals[i] - i*offset)
+            ax[0].plot((time - tau_ref[i]) * 1e6, env[i]     - i*offset, c="red")
+
+        ax[1].scatter(taus*1e6, dists)
+        ax[1].plot(taus*1e6, vg*taus + y0, c="red")
+        fig.tight_layout()
+        plt.show()
+
+    return np.array([vg, y0, rsquare])
 
 
 def cc_phase_velocity(data_in, d, type_dist = "inv", bp_w = None, bp_c = None, plot = False, offset = None, title = None):
@@ -231,27 +297,159 @@ def amplitudes(data_in, d = None, bp_w = None, bp_c = None, plot = True):
 
     return A
 
-def _rayleigh_ratio(nu):
-    # parámetro k = c_S² / c_L²
-    k = (1 - 2*nu) / (2*(1 - nu))             # siempre 0 < k < 1 en el rango válido
+def _rayleigh_ratio(v):
 
-    # polinomio f(ξ) = 0  (Rayleigh, 1911)
+    k = (1 - 2*v) / (2*(1 - v))
+
     f = lambda x: x**6 - 8*x**4 + 8*(3 - 2*k)*x**2 - 16*(1 - k)
 
-    # única raíz física está en (0,1); brentq necesita extremos con signo opuesto
     return brentq(f, 1e-9, 1 - 1e-9, maxiter=100, xtol=1e-12)
 
-def wave_speeds(E, nu, rho):
-    if not (-1.0 < nu < 0.5):
+def wave_speeds(E, v, p):
+    if not (-1.0 < v < 0.5):
         raise ValueError("ν debe estar en (-1, 0.5).")
-    if E <= 0 or rho <= 0:
+    if E <= 0 or p <= 0:
         raise ValueError("E y ρ deben ser positivos.")
 
     # ondas volumétricas exactas
-    c_L = np.sqrt(E*(1 - nu) / (rho*(1 + nu)*(1 - 2*nu)))
-    c_S = np.sqrt(E / (2*rho*(1 + nu)))
+    c_L = np.sqrt(E*(1 - v) / (p*(1 + v)*(1 - 2*v)))
+    c_S = np.sqrt(E / (2*p*(1 + v)))
 
     # onda superficial exacta (resolviendo la ecuación)
-    xi   = _rayleigh_ratio(nu)
+    xi   = _rayleigh_ratio(v)
     c_R  = xi * c_S
     return c_L, c_S, c_R
+
+
+
+def cros_time(time, signal, thr, min_time):
+    dt = time[1] - time[0]
+    n_pass = np.ceil(min_time/dt)
+    higher = signal > thr
+
+    counts = np.convolve(higher.astype(int),
+            np.ones((n_pass.astype(int))),
+            mode='valid')
+
+    idx_valid = np.argwhere(counts == n_pass)
+
+    return time[idx_valid[0]][0]
+
+def threshold_tau(time, signal_1, signal_2, thr  = None, min_time = None):
+    if min_time == None:
+        min_time = (time[-1] - time[0])/642
+    if thr == None:
+        thr = np.concat((signal_1, signal_2)).max()*(2/5)
+
+    tau = cros_time(time, signal_2, thr, min_time) - cros_time(time, signal_1, thr, min_time)
+    return tau
+
+
+def threshold_group_velocity(data_in, d, bp_w = None, bp_c = None, bp_order = 4, plot = False, offset = None, title = None):
+
+    if bp_w != None: 
+        data_in = bandpass(data_in, bp_w, bp_c, bp_order)
+
+    time = data_in.T[0]
+    signals = data_in.T[1:]
+    n = signals.shape[0]
+
+    if offset == None:
+        offset = signals[0].max()
+
+    env = [np.abs(hilbert(signal)) for signal in signals]
+
+    t = [0]
+
+    for i in range(n-1):
+        t.append(t[i]+threshold_tau(time, env[i], env[i+1]))
+
+    t = np.array(t)
+    lr = linregress(t, d)
+
+    if plot == True:
+        fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(10, 4))
+        if title != None:
+            ax[0].set_title(title, 
+                         fontsize=14,
+                        fontweight='bold',
+                        loc='left',
+                        pad=10)
+        ax[0].set_xlabel("time [µs]")
+        ax[0].set_yticks([])
+        ax[1].set_xlabel("t [µs]")
+        ax[1].set_ylabel("d [m]")
+
+        for i in range(n):
+            ax[0].plot((time- t[i])*10**6, signals[i] - i*offset)
+            ax[0].plot((time- t[i])*10**6, env[i] - i*offset, c = "red")
+        
+        ax[1].scatter(t*10**6, d)
+        ax[1].plot(t*10**6, t*lr[0] +lr[1], c = "red")
+        fig.tight_layout()
+        plt.show()
+
+    plt.show()
+    
+    return np.array([lr[0], lr[1], lr[2]**2])
+
+
+def threshold_group_velocity_all(data_in, d,
+                          bp_w=None, bp_c=None, bp_order=4,
+                          plot=False, offset=None, title=None):
+
+    # ----------- pre-procesado ---------------------
+    if bp_w is not None:
+        data_in = bandpass(data_in, bp_w, bp_c, bp_order)
+
+    time    = data_in.T[0]
+    signals = data_in.T[1:]
+    n       = signals.shape[0]
+
+    if offset is None:
+        offset = signals[0].max()
+
+    env = [np.abs(hilbert(signal)) for signal in signals]   # envolventes
+
+    # ---------------- correlaciones cruzadas --------------------------
+    taus, dists = [], []
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                continue
+            tau_ij = threshold_tau(time, env[i], env[j])   # retraso j respecto a i
+            taus.append(tau_ij)
+            dists.append(d[j] - d[i])              # distancia j-i
+
+    taus, dists = np.array(taus), np.array(dists)
+
+    lr = linregress(taus, dists)                   # pendiente = velocidad
+    vg      = lr.slope
+    y0      = lr.intercept
+    rsquare = lr.rvalue**2
+
+    # -------------------- gráfica --------------------------
+    if plot:
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(1, 2, figsize=(10, 4))
+
+        if title:
+            ax[0].set_title(title, fontweight='bold', loc='left', pad=10)
+        ax[0].set_xlabel("time [µs]")
+        ax[0].set_yticks([])
+        ax[1].set_xlabel("τ [µs]")
+        ax[1].set_ylabel("Δd [m]")
+
+        # Para ilustrar: “alineamos” cada traza usando su τ medio respecto a la 0
+        tau_ref = d/vg
+        
+        for i in range(n):
+            ax[0].plot((time - tau_ref[i]) * 1e6, signals[i] - i*offset)
+            ax[0].plot((time - tau_ref[i]) * 1e6, env[i]     - i*offset, c="red")
+
+        ax[1].scatter(taus*1e6, dists)
+        ax[1].plot(taus*1e6, vg*taus + y0, c="red")
+        fig.tight_layout()
+        plt.show()
+
+    return np.array([vg, y0, rsquare])
