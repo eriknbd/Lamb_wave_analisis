@@ -150,12 +150,7 @@ def cc_group_velocity(data_in, d, bp_w = None, bp_c = None, bp_order = 4, plot =
 def cc_group_velocity_all(data_in, d,
                           bp_w=None, bp_c=None, bp_order=4,
                           plot=False, offset=None, title=None):
-    """
-    Calcula la velocidad de grupo usando la correlación cruzada de *todos*
-    los pares de señales (i,j) con i != j.
 
-    Devuelve np.array([vg, intercepto, R2])
-    """
     # ----------- pre-procesado ---------------------
     if bp_w is not None:
         data_in = bandpass(data_in, bp_w, bp_c, bp_order)
@@ -173,7 +168,7 @@ def cc_group_velocity_all(data_in, d,
     taus, dists = [], []
     for i in range(n):
         for j in range(n):
-            if i == j:
+            if i == j or i < j:
                 continue
             tau_ij = cc_tau(time, env[i], env[j])   # retraso j respecto a i
             taus.append(tau_ij)
@@ -325,21 +320,26 @@ def wave_speeds(E, v, p):
 def cros_time(time, signal, thr, min_time):
     dt = time[1] - time[0]
     n_pass = np.ceil(min_time/dt)
-    higher = signal > thr
+    idx_valid = np.array([])
 
-    counts = np.convolve(higher.astype(int),
-            np.ones((n_pass.astype(int))),
-            mode='valid')
+    if thr == None:
+        thr = signal.max()*(2/5)
 
-    idx_valid = np.argwhere(counts == n_pass)
+    while idx_valid.size == 0:
+        higher = signal > thr
+
+        counts = np.convolve(higher.astype(int),
+                np.ones((n_pass.astype(int))),
+                mode='valid')
+
+        idx_valid = np.argwhere(counts == n_pass)
+        thr = thr*9/10        
 
     return time[idx_valid[0]][0]
 
 def threshold_tau(time, signal_1, signal_2, thr  = None, min_time = None):
     if min_time == None:
         min_time = (time[-1] - time[0])/642
-    if thr == None:
-        thr = np.concat((signal_1, signal_2)).max()*(2/5)
 
     tau = cros_time(time, signal_2, thr, min_time) - cros_time(time, signal_1, thr, min_time)
     return tau
@@ -415,7 +415,7 @@ def threshold_group_velocity_all(data_in, d,
     taus, dists = [], []
     for i in range(n):
         for j in range(n):
-            if i == j:
+            if i == j or i < j:
                 continue
             tau_ij = threshold_tau(time, env[i], env[j])   # retraso j respecto a i
             taus.append(tau_ij)
