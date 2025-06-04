@@ -32,7 +32,7 @@ def max_frecuency(data_in, plot = False, db = True):
 
 
     if signal.shape[0] == 1:
-        f_pos , mag = fft_gen(time, signal)
+        f_pos , mag = fft_gen(time, signal[0])
 
     else:
         f_pos = fft_gen(time, signal[0])[0]
@@ -208,7 +208,7 @@ def cc_group_velocity_all(data_in, d,
     return np.array([vg, y0, rsquare])
 
 
-def cc_phase_velocity(data_in, d, type_dist = "inv", bp_w = None, bp_c = None, plot = False, offset = None, title = None):
+def cc_phase_velocity(data_in, d, short_step_start = 14, bp_w = None, bp_c = None, plot = False, offset = None, title = None):
 
     if bp_w != None:
         data_in = bandpass(data_in, bp_w, bp_c)
@@ -219,12 +219,8 @@ def cc_phase_velocity(data_in, d, type_dist = "inv", bp_w = None, bp_c = None, p
     if offset == None:
         offset = signals[0].max()
 
-    if type_dist == "inv":
-        d = d[14:]
-        signals = signals[14:]
-    elif type_dist == "dir":
-        d = d[:21]
-        signals = signals[:21]
+    d = d[short_step_start:]
+    signals = signals[short_step_start:]
     n = signals.shape[0]
 
     t = [0]
@@ -257,23 +253,6 @@ def cc_phase_velocity(data_in, d, type_dist = "inv", bp_w = None, bp_c = None, p
 
 
     return np.array([lr[0], lr[1], lr[2]**2])
-
-
-def full_analisis(data_in, d, type_dist, bp_c = None, bp_w = None, plot = True, print_data = True, round_to = 4, title = None):
-
-    f_max = max_frecuency(data_in, plot = plot)
-    if print_data:
-        print(f'Mean frecuency max = {round(f_max*10**-3, round_to)} kHz.')
-
-    vg = cc_group_velocity(data_in, d, bp_c = bp_c, bp_w = bp_w, plot = plot, title= title)
-    if print_data:
-        print(f'vg = {round(vg[0], round_to)} m/s; Intercept = {round(vg[1], round_to)}; r2 = {round(vg[2], round_to)}.')
-
-    vf = cc_phase_velocity(data_in, d, bp_c = bp_c, bp_w = bp_w, plot = plot, title= title, type_dist = type_dist)
-    if print_data:
-        print(f'vf = {round(vf[0], round_to)} m/s; Intercept = {round(vf[1], round_to)}; r2 = {round(vf[2], round_to)}.')
-
-    return f_max, vg, vf
 
 
 def amplitudes(data_in, d = None, bp_w = None, bp_c = None, plot = True):
@@ -317,13 +296,15 @@ def wave_speeds(E, v, p):
 
 
 
-def cros_time(time, signal, thr, min_time):
+def cros_time(time, signal, thr_frac, min_time):
     dt = time[1] - time[0]
     n_pass = np.ceil(min_time/dt)
     idx_valid = np.array([])
 
-    if thr == None:
+    if thr_frac == None:
         thr = signal.max()*(2/5)
+    else:
+        thr = signal.max()*thr_frac
 
     while idx_valid.size == 0:
         higher = signal > thr
@@ -337,15 +318,17 @@ def cros_time(time, signal, thr, min_time):
 
     return time[idx_valid[0]][0]
 
-def threshold_tau(time, signal_1, signal_2, thr  = None, min_time = None):
+def threshold_tau(time, signal_1, signal_2, thr_frac  = None, min_time = None):
     if min_time == None:
         min_time = (time[-1] - time[0])/642
 
-    tau = cros_time(time, signal_2, thr, min_time) - cros_time(time, signal_1, thr, min_time)
+    tau = cros_time(time, signal_2, thr_frac, min_time) - cros_time(time, signal_1, thr_frac, min_time)
     return tau
 
 
-def threshold_group_velocity(data_in, d, bp_w = None, bp_c = None, bp_order = 4, plot = False, offset = None, title = None):
+def threshold_group_velocity(data_in, d, thr_frac = None, 
+                             bp_w = None, bp_c = None, bp_order = 4, 
+                             plot = False, offset = None, title = None):
 
     if bp_w != None: 
         data_in = bandpass(data_in, bp_w, bp_c, bp_order)
@@ -362,7 +345,7 @@ def threshold_group_velocity(data_in, d, bp_w = None, bp_c = None, bp_order = 4,
     t = [0]
 
     for i in range(n-1):
-        t.append(t[i]+threshold_tau(time, env[i], env[i+1]))
+        t.append(t[i]+threshold_tau(time, env[i], env[i+1], thr_frac = thr_frac))
 
     t = np.array(t)
     lr = linregress(t, d)
@@ -394,9 +377,9 @@ def threshold_group_velocity(data_in, d, bp_w = None, bp_c = None, bp_order = 4,
     return np.array([lr[0], lr[1], lr[2]**2])
 
 
-def threshold_group_velocity_all(data_in, d,
-                          bp_w=None, bp_c=None, bp_order=4,
-                          plot=False, offset=None, title=None):
+def threshold_group_velocity_all(data_in, d, thr_frac = None, 
+                                 bp_w=None, bp_c=None, bp_order=4, 
+                                 plot=False, offset=None, title=None):
 
     # ----------- pre-procesado ---------------------
     if bp_w is not None:
@@ -417,7 +400,7 @@ def threshold_group_velocity_all(data_in, d,
         for j in range(n):
             if i == j or i < j:
                 continue
-            tau_ij = threshold_tau(time, env[i], env[j])   # retraso j respecto a i
+            tau_ij = threshold_tau(time, env[i], env[j], thr_frac)   # retraso j respecto a i
             taus.append(tau_ij)
             dists.append(d[j] - d[i])              # distancia j-i
 
@@ -453,3 +436,19 @@ def threshold_group_velocity_all(data_in, d,
         plt.show()
 
     return np.array([vg, y0, rsquare])
+
+def full_analisis(data_in, d, f_group_velocity = threshold_group_velocity_all, short_step_start = 14, bp_c = None, bp_w = None, plot = True, print_data = True, round_to = 4, title = None):
+
+    f_max = max_frecuency(data_in, plot = plot)
+    if print_data:
+        print(f'Mean frecuency max = {round(f_max*10**-3, round_to)} kHz.')
+
+    vg = f_group_velocity(data_in, d, bp_c = bp_c, bp_w = bp_w, plot = plot, title= title)
+    if print_data:
+        print(f'vg = {round(vg[0], round_to)} m/s; Intercept = {round(vg[1], round_to)}; r2 = {round(vg[2], round_to)}.')
+
+    vf = cc_phase_velocity(data_in, d, bp_c = bp_c, bp_w = bp_w, plot = plot, title= title, short_step_start = short_step_start)
+    if print_data:
+        print(f'vf = {round(vf[0], round_to)} m/s; Intercept = {round(vf[1], round_to)}; r2 = {round(vf[2], round_to)}.')
+
+    return f_max, vg, vf
